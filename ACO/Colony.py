@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -11,6 +11,7 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
 from .Evaluator import EvaluationResult, Evaluator
+from .Observers import Observers, BaseObserver
 from .Strategies import STRATEGIES, StrategyName
 from .Strategies.base import AntContext, IterationContext, MoveContext, PheromoneStrategy, SearchContext
 from .utils import END, PARAMS, LayerConfig, Step, seed_everything
@@ -112,9 +113,13 @@ class Colony:
         config: ColonyConfig | None = None,
         evaluator: Evaluator | None = None,
         strategy: PheromoneStrategy | None = None,
+        observers: BaseObserver | Iterable[BaseObserver] | None = None,
     ):
         self.config = config or ColonyConfig()
         self.evaluator = evaluator or Evaluator()
+        self.observers = Observers()
+        if observers is not None:
+            self.register_observer(observers)
         self.strategy = strategy or STRATEGIES[self.config.strategy]()
         self.ants: list[Ant] = []
         self.best_ant: Ant | None = None
@@ -125,20 +130,26 @@ class Colony:
         path: str | Path,
         evaluator: Evaluator | None = None,
         strategy: PheromoneStrategy | None = None,
+        observers: BaseObserver | Iterable[BaseObserver] | None = None,
     ) -> Colony:
         """Creates a colony from a JSON file; missing fields keep their defaults."""
         config = ColonyConfig.model_validate_json(Path(path).read_text(encoding="utf-8"))
-        return cls(config, evaluator, strategy)
+        return cls(config, evaluator, strategy, observers)
 
-    def run(self) -> Ant:
+    def run(self) -> Ant | None:
         config = self.config
         seed_everything(config.seed)
         rng = np.random.default_rng(config.seed)
-        self.strategy.on_search_start(SearchContext(config.search_space, config, rng))
+        search_ctx = SearchContext(config.search_space, config, rng)
+        self.strategy.on_search_start(search_ctx)
+        self.observers.on_search_start(search_ctx, self.strategy.snapshot())
+        
 
         for iteration in range(config.n_iterations):
             depth_limit = self.depth_limit(iteration)
-            self.strategy.on_iteration_start(IterationContext(iteration, depth_limit)) # HONESTLY NO IDEA WHY THIS EXIST, IT DOES NOTHING
+            iteration_ctx = IterationContext(iteration, depth_limit)
+            self.strategy.on_iteration_start(iteration_ctx) # HONESTLY NO IDEA WHY THIS EXIST, IT DOES NOTHING
+            self.observers.on_iteration_start(iteration_ctx, self.strategy.snapshot())
 
             ants = [self._run_ant(iteration, depth_limit) for _ in range(config.n_ants)]
             iteration_best = max(ants, key=lambda ant: ant.score)
@@ -146,10 +157,24 @@ class Colony:
                 self.best_ant = iteration_best
 
             update_ant = self.best_ant if config.global_update_ant == "global_best" else iteration_best # PICK THE BEST AND OVERALL OR IN THE ITERATION TO UPDATED PHEROMONES
-            self.strategy.on_global_step_end(
-                IterationContext(iteration, depth_limit, tuple(ants), self.best_ant, update_ant)
-            )
+            global_ctx = IterationContext(iteration, depth_limit, tuple(ants), self.best_ant, update_ant)
+            self.strategy.on_global_step_end(global_ctx)
+            self.observers.on_global_step_end(global_ctx, self.strategy.snapshot())
+
+        self.observers.on_search_end(self.best_ant, self.strategy.snapshot()) # pyright: ignore[reportArgumentType] <- this tell the linter to shut up
         return self.best_ant
+
+    def register_observer(self, observers: BaseObserver | Iterable[BaseObserver]) -> None:
+        """Adds one observer, a list of them or a whole Observers group."""
+        match observers:
+            case Observers() | list() | tuple():  
+                self.observers.extend(observers)
+            case BaseObserver():
+                self.observers.append(observers)
+            case _:
+                raise TypeError(
+                    f"Expected a BaseObserver, a list of them or Observers, got {type(observers).__name__}"
+                )
 
     def depth_limit(self, iteration: int) -> int:
         space = self.config.search_space
@@ -161,7 +186,9 @@ class Colony:
         ant = self._walk(iteration, depth_limit)
         ant.result = self.evaluator.evaluate_path(ant.path, reuse_weights=self.config.reuse_weights)
         self.ants.append(ant)
-        self.strategy.on_local_step_end(AntContext(iteration, ant))  # THIS DOES THE SAME AS ON_ANT_STEP_END IN THE _WALK FUNCTION
+        ant_ctx = AntContext(iteration, ant)
+        self.strategy.on_local_step_end(ant_ctx)  # THIS DOES THE SAME AS ON_ANT_STEP_END IN THE _WALK FUNCTION
+        self.observers.on_local_step_end(ant_ctx, self.strategy.snapshot())
         return ant
 
     def _walk(self, iteration: int, depth_limit: int) -> Ant:
@@ -181,6 +208,7 @@ class Colony:
             step = self.strategy.on_ant_movement(ctx) 
             ant.steps.append(step)
             self.strategy.on_ant_step_end(ctx, step)  # THIS DOES THE SAME AS ON_LOCAL_STEP_END IN THE _RUN_ANT FUNCTION
+            self.observers.on_ant_step_end(ctx, step, self.strategy.snapshot())
             if step is END:
                 break
             prev = step
