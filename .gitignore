@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Downloaded datasets (the folder itself stays via .gitkeep)
+/data/*
+!/data/.gitkeep
