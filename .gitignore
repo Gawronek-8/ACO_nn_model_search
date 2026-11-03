@@ -221,3 +221,6 @@ __marimo__/
 # Downloaded datasets (the folder itself stays via .gitkeep)
 /data/*
 !/data/.gitkeep
+
+!/runs/.gitkeep
+/runs/*
