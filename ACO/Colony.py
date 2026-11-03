@@ -116,7 +116,9 @@ class Colony:
         observers: BaseObserver | Iterable[BaseObserver] | None = None,
     ):
         self.config = config or ColonyConfig()
-        self.evaluator = evaluator or Evaluator()
+        if evaluator is None:
+            raise ValueError("Colony needs an Evaluator, build one from a DataSplit: Evaluator(data, EvaluatorConfig(...))")
+        self.evaluator = evaluator
         self.observers = Observers()
         if observers is not None:
             self.register_observer(observers)
