@@ -9,6 +9,7 @@ Command line options override the values in the config file.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import settings
@@ -44,7 +45,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{config.name}: {config.dataset}, {config.colony.strategy}, {config.n_models} models per seed, "
         f"seeds {config.seeds}, device {config.evaluator.device}"
     )
-    summary = run_experiment(config, args.out, args.data_dir)
+    try:
+        summary = run_experiment(config, args.out, args.data_dir)
+    except RuntimeError as error:  # e.g. --device gpu without a GPU
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     scores = summary[["best_val_accuracy", "test_accuracy", "train_time_s"]]
     print(f"\nover {len(summary)} seed(s):")
     print(scores.agg(["mean", "std"]).round(4).to_string())

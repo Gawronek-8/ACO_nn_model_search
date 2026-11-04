@@ -70,30 +70,75 @@ class ProgressObserver(BaseObserver):
         )
 
 
+SUMMARY_KEYS = (
+    "experiment", "dataset", "strategy", "seed", "device", "n_models", "best_val_accuracy", "best_val_loss",
+    "best_layers", "best_n_params", "test_accuracy", "test_loss", "train_time_s", "search_time_s",
+)
+
+Loader = Callable[["ExperimentConfig", "str | Path | None"], DataSplit]
+
+
+def load_experiment_data(config: ExperimentConfig, data_dir: str | Path | None = None) -> DataSplit:
+    return load_dataset(config.dataset, seed=config.data_seed, min_class_count=config.min_class_count, data_dir=data_dir)
+
+
 def run_experiment(
     config: ExperimentConfig,
     out_dir: str | Path = "runs",
     data_dir: str | Path | None = None,
     log: Log = print,
+    resume: bool = False,
+    loader: Loader | None = None,
 ) -> pd.DataFrame:
-    """Runs every seed of the experiment and returns the per-seed summary table."""
-    data = load_dataset(
-        config.dataset, seed=config.data_seed, min_class_count=config.min_class_count, data_dir=data_dir
-    )
+    """Runs every seed of the experiment and returns the per-seed summary table.
+
+    With `resume`, a seed whose folder already holds a summary.json made with the same settings is not run again.
+    The data is only loaded when some seed actually needs it; `loader` lets a caller share loaded data.
+    """
+    load = loader or load_experiment_data
     experiment_dir = Path(out_dir) / config.name
     strategy = config.colony.strategy
+    data = None
     rows = []
     for seed in config.seeds:
         run_dir = experiment_dir / f"{config.dataset}_{strategy}_s{seed}"
+        done = finished_summary(run_dir, run_config(config, seed)) if resume else None
+        if done is not None:
+            log(f"[{config.dataset} {strategy} seed {seed}] already done, skipping")
+            rows.append(done)
+            continue
+        if data is None:
+            data = load(config, data_dir)
         rows.append(run_seed(config, data, seed, run_dir, log))
     summary = pd.DataFrame(rows)
+    experiment_dir.mkdir(parents=True, exist_ok=True)
     summary.to_csv(experiment_dir / f"summary_{config.dataset}_{strategy}.csv", index=False)
     return summary
 
 
+def run_config(config: ExperimentConfig, seed: int) -> ExperimentConfig:
+    """The settings of one run: the experiment config narrowed down to a single seed."""
+    return config.model_copy(update={"seeds": [seed], "colony": config.colony.model_copy(update={"seed": seed})})
+
+
+def finished_summary(run_dir: Path, expected: ExperimentConfig) -> dict | None:
+    """The saved summary of an earlier run in `run_dir`, or None if there is none or its settings differ."""
+    path = run_dir / "summary.json"
+    if not path.exists():
+        return None
+    try:
+        details = json.loads(path.read_text(encoding="utf-8"))
+        if details["config"] != expected.model_dump(mode="json"):
+            return None
+        return {key: details[key] for key in SUMMARY_KEYS}
+    except (ValueError, KeyError):
+        return None
+
+
 def run_seed(config: ExperimentConfig, data: DataSplit, seed: int, run_dir: Path, log: Log = print) -> dict:
     """One colony run on prepared data: search on validation, then score the winner on the test set."""
-    colony_config = config.colony.model_copy(update={"seed": seed})
+    this_run = run_config(config, seed)
+    colony_config = this_run.colony
     label = f"{config.dataset} {colony_config.strategy} seed {seed}"
     evaluator = Evaluator(data, config.evaluator)
     observer = ProgressObserver(label, colony_config.n_iterations, log)
@@ -126,7 +171,7 @@ def run_seed(config: ExperimentConfig, data: DataSplit, seed: int, run_dir: Path
         "train_time_s": float(ants["train_time"].sum()),
         "search_time_s": search_time,
     }
-    details = {**summary, "best_path": [asdict(layer) for layer in best.path], "config": config.model_dump()}
+    details = {**summary, "best_path": [asdict(layer) for layer in best.path], "config": this_run.model_dump(mode="json")}
     (run_dir / "summary.json").write_text(json.dumps(details, indent=2), encoding="utf-8")
     log(f"[{label}] best val {summary['best_val_accuracy']:.4f}, test {summary['test_accuracy']:.4f}, {summary['best_layers']}")
     return summary

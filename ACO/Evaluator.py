@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import time
+import warnings
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -52,11 +53,17 @@ class _StoredWeights:
     head: dict[str, torch.Tensor] | None
 
 
+def _cuda_available() -> bool:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # old drivers make torch warn on the very first check
+        return torch.cuda.is_available()
+
+
 def resolve_device(name: str) -> torch.device:
     """'cpu' is always CPU, 'gpu' is CUDA (or Apple MPS) and fails loudly when there is none, 'auto' picks what exists."""
     if name == "cpu":
         return torch.device("cpu")
-    if torch.cuda.is_available():
+    if _cuda_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
