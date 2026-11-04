@@ -144,14 +144,36 @@ uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 
 Drugą komendę uruchamiasz z katalogu głównego repo, a przeglądarka pod `http://127.0.0.1:5000`. Każdy przebieg to run w eksperymencie MLflow o nazwie z `name`. Zawiera parametry konfiguracji, metryki po każdej iteracji (`iteration_best`, `iteration_mean`, `best_so_far`) i po każdej sieci (`ant_val_accuracy`), wynik końcowy (`test_accuracy` itd.) oraz pliki przebiegu jako artefakty. Baza leży w `mlruns/`, którego git nie śledzi, więc każdy ma własną. Przebiegi pominięte przez wznawianie nie są logowane ponownie.
 
-## 9. Zasady w zespole
+## 9. Wykresy do raportu: `plots.py`
+
+Po zakończonych eksperymentach:
+
+```
+uv run python plots.py e1
+uv run python plots.py e3_evap_0.1 e3_evap_0.3 e3_evap_0.5
+```
+
+Pliki lądują w `runs/<nazwa>/plots/` (przy kilku eksperymentach w `runs/plots_<nazwy>/`, albo gdzie wskażesz `--out`). Każdy wykres jest w **PNG i PDF** (`--format pdf` żeby tylko jeden), PDF-y mają osadzone fonty, więc nadają się do LaTeX-a (`\includegraphics{convergence.pdf}`).
+
+| plik | co pokazuje |
+|---|---|
+| `convergence` | najlepsza dokładność walidacyjna vs liczba ocenionych modeli (średnia po seedach, pasmo ±1 odch. std.) |
+| `efficiency` | to samo vs skumulowany czas treningu |
+| `distribution` | rozkład dokładności wszystkich ocenionych sieci |
+| `test_accuracy` | dokładność testowa zwycięskiej sieci, kropka = seed |
+| `pheromones_<dataset>_<strategia>` | końcowe tabele feromonów (nie ma ich dla `random`) |
+| `summary_table.csv` / `.tex` | tabela średnich; `.tex` to `booktabs`, wstawiasz przez `\input{}` |
+
+Jeden folder eksperymentu daje serię na strategię; kilka folderów (np. warianty E3) daje serię na eksperyment. Kolor strategii jest stały na wszystkich wykresach. Wykresy czytają tylko pliki z `runs/`, więc można je robić na innym komputerze niż liczyły się eksperymenty.
+
+## 10. Zasady w zespole
 
 - **Te same ziarna dla wszystkich.** Ustalcie listę (np. `0 1 2 3 4`) i używajcie jej w każdym eksperymencie, żeby wyniki dało się porównać.
 - **Nazwy.** Ostateczne wyniki mają nazwę eksperymentu (`e1`, `e2`, `e3_evap_0.3`...), a próbne przebiegi nazywamy `smoke` albo `test*`. **Folder `runs/` jest ignorowany przez git**, więc ostateczne wyniki wymieniajcie między sobą osobno (np. wspólny dysk). Jeśli zespół zdecyduje, że wyniki mają być w repo, dodaj je jawnie: `git add -f runs/e1` (pliki są małe).
 - **GPU i CPU.** Wyniki z różnych urządzeń różnią się minimalnie (inna kolejność operacji zmiennoprzecinkowych). Kolumna `device` zapisuje, na czym liczyło się dany przebieg. Dla uczciwego porównania metod licz je na tej samej maszynie.
 - **Czas.** Zanim odpalisz duży grid, zmierz jeden przebieg (`--datasets letter --strategies param_dependent --seeds 0`) i zobacz `search_time_s`. Pomnóż przez liczbę przebiegów z `--dry-run`.
 
-## 10. Gdy coś nie działa
+## 11. Gdy coś nie działa
 
 | Objaw | Co zrobić |
 |---|---|
