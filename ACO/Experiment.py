@@ -25,8 +25,9 @@ from .Colony import Ant, Colony, ColonyConfig
 from .Data import DataSplit
 from .Datasets import DATASETS, load_dataset
 from .Evaluator import Evaluator, EvaluatorConfig
-from .Observers import BaseObserver
+from .Observers import BaseObserver, PheromoneRecorder
 from .Strategies.base import IterationContext
+from .Tracking import MLflowTracker, flatten_params
 
 Log = Callable[[str], None]
 
@@ -89,6 +90,7 @@ def run_experiment(
     log: Log = print,
     resume: bool = False,
     loader: Loader | None = None,
+    tracker: MLflowTracker | None = None,
 ) -> pd.DataFrame:
     """Runs every seed of the experiment and returns the per-seed summary table.
 
@@ -109,7 +111,7 @@ def run_experiment(
             continue
         if data is None:
             data = load(config, data_dir)
-        rows.append(run_seed(config, data, seed, run_dir, log))
+        rows.append(run_seed(config, data, seed, run_dir, log, tracker))
     summary = pd.DataFrame(rows)
     experiment_dir.mkdir(parents=True, exist_ok=True)
     summary.to_csv(experiment_dir / f"summary_{config.dataset}_{strategy}.csv", index=False)
@@ -135,44 +137,73 @@ def finished_summary(run_dir: Path, expected: ExperimentConfig) -> dict | None:
         return None
 
 
-def run_seed(config: ExperimentConfig, data: DataSplit, seed: int, run_dir: Path, log: Log = print) -> dict:
-    """One colony run on prepared data: search on validation, then score the winner on the test set."""
+def run_seed(
+    config: ExperimentConfig,
+    data: DataSplit,
+    seed: int,
+    run_dir: Path,
+    log: Log = print,
+    tracker: MLflowTracker | None = None,
+) -> dict:
+    """One colony run on prepared data: search on validation, then score the winner on the test set.
+
+    Besides ants.csv and summary.json the run folder gets pheromones.npz (ACO strategies only), and with a
+    `tracker` the run is logged to MLflow as well.
+    """
     this_run = run_config(config, seed)
     colony_config = this_run.colony
     label = f"{config.dataset} {colony_config.strategy} seed {seed}"
     evaluator = Evaluator(data, config.evaluator)
-    observer = ProgressObserver(label, colony_config.n_iterations, log)
+    recorder = PheromoneRecorder()
+    observers: list[BaseObserver] = [ProgressObserver(label, colony_config.n_iterations, log), recorder]
+    if tracker is not None:
+        observers.append(tracker)
+        tags = {
+            "dataset": config.dataset, "strategy": colony_config.strategy, "seed": str(seed), "device": str(evaluator.device)
+        }
+        tracker.start(config.name, label, flatten_params(this_run.model_dump(mode="json")), tags)
 
-    start = time.perf_counter()
-    colony = Colony(colony_config, evaluator, observers=observer)
-    best = colony.run()
-    search_time = time.perf_counter() - start
-    if best is None:
-        raise RuntimeError("The colony finished without evaluating any ant")
+    try:
+        start = time.perf_counter()
+        colony = Colony(colony_config, evaluator, observers=observers)
+        best = colony.run()
+        search_time = time.perf_counter() - start
+        if best is None:
+            raise RuntimeError("The colony finished without evaluating any ant")
 
-    test = evaluator.final_test(best.path)  # retrains the winner from scratch, scores it on the test set
-    ants = ants_table(colony.ants)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    ants.to_csv(run_dir / "ants.csv", index=False)
+        test = evaluator.final_test(best.path)  # retrains the winner from scratch, scores it on the test set
+        ants = ants_table(colony.ants)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        ants.to_csv(run_dir / "ants.csv", index=False)
+        recorder.save(run_dir / "pheromones.npz")
 
-    summary = {
-        "experiment": config.name,
-        "dataset": config.dataset,
-        "strategy": colony_config.strategy,
-        "seed": seed,
-        "device": str(evaluator.device),
-        "n_models": len(colony.ants),
-        "best_val_accuracy": best.result.val_accuracy,  # pyright: ignore[reportOptionalMemberAccess]
-        "best_val_loss": best.result.val_loss,  # pyright: ignore[reportOptionalMemberAccess]
-        "best_layers": layers_text(best.path),
-        "best_n_params": best.result.n_params,  # pyright: ignore[reportOptionalMemberAccess]
-        "test_accuracy": test.val_accuracy,  # the metric fields of final_test hold the test numbers
-        "test_loss": test.val_loss,
-        "train_time_s": float(ants["train_time"].sum()),
-        "search_time_s": search_time,
-    }
-    details = {**summary, "best_path": [asdict(layer) for layer in best.path], "config": this_run.model_dump(mode="json")}
-    (run_dir / "summary.json").write_text(json.dumps(details, indent=2), encoding="utf-8")
+        summary = {
+            "experiment": config.name,
+            "dataset": config.dataset,
+            "strategy": colony_config.strategy,
+            "seed": seed,
+            "device": str(evaluator.device),
+            "n_models": len(colony.ants),
+            "best_val_accuracy": best.result.val_accuracy,  # pyright: ignore[reportOptionalMemberAccess]
+            "best_val_loss": best.result.val_loss,  # pyright: ignore[reportOptionalMemberAccess]
+            "best_layers": layers_text(best.path),
+            "best_n_params": best.result.n_params,  # pyright: ignore[reportOptionalMemberAccess]
+            "test_accuracy": test.val_accuracy,  # the metric fields of final_test hold the test numbers
+            "test_loss": test.val_loss,
+            "train_time_s": float(ants["train_time"].sum()),
+            "search_time_s": search_time,
+        }
+        details = {
+            **summary, "best_path": [asdict(layer) for layer in best.path], "config": this_run.model_dump(mode="json")
+        }
+        (run_dir / "summary.json").write_text(json.dumps(details, indent=2), encoding="utf-8")
+        if tracker is not None:
+            tracker.finish(summary, run_dir)
+    except BaseException:
+        if tracker is not None:
+            tracker.fail()
+        raise
+
     log(f"[{label}] best val {summary['best_val_accuracy']:.4f}, test {summary['test_accuracy']:.4f}, {summary['best_layers']}")
     return summary
 

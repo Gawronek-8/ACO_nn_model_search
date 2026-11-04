@@ -222,5 +222,7 @@ __marimo__/
 /data/*
 !/data/.gitkeep
 
-!/runs/.gitkeep
 /runs/*
+!/runs/.gitkeep
+# MLflow store (--mlflow)
+/mlruns/

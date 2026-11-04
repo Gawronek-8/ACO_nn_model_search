@@ -50,6 +50,7 @@ uv run python grid.py configs/default.json --datasets all --strategies all --see
 | `--name` | nazwa eksperymentu, czyli folder w `runs/` |
 | `--dry-run` | tylko wypisuje plan i liczbę modeli |
 | `--no-resume` | liczy wszystko od nowa, nawet skończone przebiegi |
+| `--mlflow` | dodatkowo loguje każdy przebieg do MLflow (sekcja 8) |
 
 `--device gpu` kończy się błędem, jeśli GPU nie ma (nie przełącza się po cichu na CPU). `auto` używa GPU, jeśli jest, a w przeciwnym razie CPU.
 
@@ -113,6 +114,7 @@ runs/<name>/
   <dataset>_<strategy>_s<seed>/
     ants.csv                                każda oceniona sieć, w kolejności oceny
     summary.json                            najlepsza sieć, wynik na teście, pełna konfiguracja
+    pheromones.npz                          stan feromonów po każdej iteracji (tylko strategie ACO)
 ```
 
 Kolumny `ants.csv`: `ant`, `iteration`, `n_layers`, `layers` (np. `64-relu-0.1 | 32-tanh-0.0`, czyli neurony-aktywacja-dropout), `val_accuracy`, `val_loss`, `train_time`, `n_params`, `best_so_far`.
@@ -121,14 +123,35 @@ W `summary.json` i `grid_summary.csv`: `best_val_accuracy`, `test_accuracy`, `tr
 
 Wynik na teście (`test_accuracy`) pochodzi z ponownego treningu najlepszej architektury od zera. Mrówki nigdy nie widzą zbioru testowego. Do wyboru architektury służy walidacja.
 
-## 8. Zasady w zespole
+## 8. Feromony i MLflow
+
+**Feromony.** Każdy przebieg ACO zapisuje `pheromones.npz`: stan tablic feromonów na początku i po każdej iteracji. Random Search nie ma feromonów, więc tego pliku nie dostaje. Z tego robimy heatmapy.
+
+```python
+import numpy as np
+tables = np.load("runs/e1/wine_param_dependent_s0/pheromones.npz")
+tables["neurons"].shape   # (iteracje + 1, głębokość, kontekst, wartość)
+```
+
+Indeks 0 to stan początkowy (wszędzie `τ0`), indeks `i` to stan po `i`-tej iteracji. Tablice to `type` (FC albo END) i `neurons`, `activation`, `dropout` (strategie `independent` i `param_dependent`) albo `config` (strategia `config_dependent`).
+
+**MLflow.** Dodaj `--mlflow` do `main.py` albo `grid.py`:
+
+```powershell
+uv run python grid.py configs/default.json --strategies param_dependent random --seeds 0 1 2 --name e1 --mlflow
+uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
+```
+
+Drugą komendę uruchamiasz z katalogu głównego repo, a przeglądarka pod `http://127.0.0.1:5000`. Każdy przebieg to run w eksperymencie MLflow o nazwie z `name`. Zawiera parametry konfiguracji, metryki po każdej iteracji (`iteration_best`, `iteration_mean`, `best_so_far`) i po każdej sieci (`ant_val_accuracy`), wynik końcowy (`test_accuracy` itd.) oraz pliki przebiegu jako artefakty. Baza leży w `mlruns/`, którego git nie śledzi, więc każdy ma własną. Przebiegi pominięte przez wznawianie nie są logowane ponownie.
+
+## 9. Zasady w zespole
 
 - **Te same ziarna dla wszystkich.** Ustalcie listę (np. `0 1 2 3 4`) i używajcie jej w każdym eksperymencie, żeby wyniki dało się porównać.
-- **Nazwy.** Ostateczne wyniki mają nazwę eksperymentu (`e1`, `e2`, `e3_evap_0.3`...) i je commitujemy (pliki są małe). Próbne przebiegi nazywamy `smoke` albo `test*`, a te są ignorowane przez git.
+- **Nazwy.** Ostateczne wyniki mają nazwę eksperymentu (`e1`, `e2`, `e3_evap_0.3`...), a próbne przebiegi nazywamy `smoke` albo `test*`. **Folder `runs/` jest ignorowany przez git**, więc ostateczne wyniki wymieniajcie między sobą osobno (np. wspólny dysk). Jeśli zespół zdecyduje, że wyniki mają być w repo, dodaj je jawnie: `git add -f runs/e1` (pliki są małe).
 - **GPU i CPU.** Wyniki z różnych urządzeń różnią się minimalnie (inna kolejność operacji zmiennoprzecinkowych). Kolumna `device` zapisuje, na czym liczyło się dany przebieg. Dla uczciwego porównania metod licz je na tej samej maszynie.
 - **Czas.** Zanim odpalisz duży grid, zmierz jeden przebieg (`--datasets letter --strategies param_dependent --seeds 0`) i zobacz `search_time_s`. Pomnóż przez liczbę przebiegów z `--dry-run`.
 
-## 9. Gdy coś nie działa
+## 10. Gdy coś nie działa
 
 | Objaw | Co zrobić |
 |---|---|

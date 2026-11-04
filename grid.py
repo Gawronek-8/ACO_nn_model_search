@@ -17,6 +17,7 @@ from ACO.Datasets import DATASETS
 from ACO.Experiment import ExperimentConfig
 from ACO.Grid import aggregate, run_grid
 from ACO.Strategies import STRATEGIES
+from ACO.Tracking import MLflowTracker
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -29,6 +30,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--name", help="experiment name, used as the results folder")
     parser.add_argument("--out", type=Path, default=settings.RUNS_DIR, help="where to write the results")
     parser.add_argument("--data-dir", type=Path, default=settings.DATA_DIR, help="where datasets are cached")
+    parser.add_argument("--mlflow", action="store_true", help="also log every run to MLflow")
+    parser.add_argument("--mlflow-dir", type=Path, default=settings.MLFLOW_DIR, help="MLflow store")
     parser.add_argument("--no-resume", action="store_true", help="run everything again, even finished runs")
     parser.add_argument("--dry-run", action="store_true", help="only print what would run")
     return parser.parse_args(argv)
@@ -59,7 +62,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        summary = run_grid(config, datasets, strategies, args.out, args.data_dir, resume=not args.no_resume)
+        tracker = MLflowTracker(args.mlflow_dir) if args.mlflow else None
+        summary = run_grid(
+            config, datasets, strategies, args.out, args.data_dir, resume=not args.no_resume, tracker=tracker
+        )
     except RuntimeError as error:  # e.g. --device gpu without a GPU
         print(f"error: {error}", file=sys.stderr)
         return 1

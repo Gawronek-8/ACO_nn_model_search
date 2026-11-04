@@ -13,6 +13,7 @@ import pandas as pd
 
 from .Data import DataSplit
 from .Experiment import ExperimentConfig, Log, load_experiment_data, run_experiment
+from .Tracking import MLflowTracker
 
 
 def run_grid(
@@ -23,6 +24,7 @@ def run_grid(
     data_dir: str | Path | None = None,
     log: Log = print,
     resume: bool = True,
+    tracker: MLflowTracker | None = None,
 ) -> pd.DataFrame:
     """Runs config for every dataset and strategy; each dataset is loaded at most once."""
     combos = [(dataset, strategy) for dataset in datasets for strategy in strategies]
@@ -40,7 +42,7 @@ def run_grid(
         experiment = config.model_copy(
             update={"dataset": dataset, "colony": config.colony.model_copy(update={"strategy": strategy})}
         )
-        frames.append(run_experiment(experiment, out_dir, data_dir, log, resume=resume, loader=loader))
+        frames.append(run_experiment(experiment, out_dir, data_dir, log, resume=resume, loader=loader, tracker=tracker))
 
     summary = pd.concat(frames, ignore_index=True)
     (Path(out_dir) / config.name).mkdir(parents=True, exist_ok=True)
