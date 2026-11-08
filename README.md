@@ -178,7 +178,7 @@ bo bez niej łatwo się pogubić, gdy ktoś oba rozwiązania porównuje i rozbie
 - DeepSwarm ma feromony ustawień niezależne, a my dodaliśmy warianty zależne od tego, co było wcześniej,\
   bo w eksperymencie drugim sprawdzamy, czy z zależnościami mrówki szukają sprawniej.
 - Nie używamy heurystyki η, więc wybór zależy tylko od tego, co feromon powie,\
-  a ponowne użycie wag czeka w planach i na razie nie siedzi w żadnej metodzie ani w głowie.
+  a ponowne użycie wag mamy w `Evaluatorze`, po prefiksie ścieżki, i można je włączyć lub wyłączyć w konfiguracji.
 - Decyzję o końcu podejmujemy jawnie, osobną tablicą `type` z wyborem `FC` albo `END`,\
   więc kolonia uczy się też, kiedy przestać, i widać to w danych jako wyraźny trend.
 
@@ -354,7 +354,13 @@ ACO_nn_model_search/
 ├─ ACO/                        # cały algorytm jako pakiet
 │  ├─ __init__.py              # publiczne API pakietu
 │  ├─ Colony.py                # konfiguracja, mrówka i pętla wyszukiwania
-│  ├─ Evaluator.py             # trening i ocena sieci (na razie zaślepka)
+│  ├─ Evaluator.py             # trening i ocena sieci (CPU albo GPU)
+│  ├─ Data.py                  # DataSplit: trening, walidacja i test w tensorach
+│  ├─ Datasets.py              # Adult, Wine, Letter: pobieranie, podział, preprocessing
+│  ├─ Experiment.py            # ExperimentConfig i uruchamianie jednego eksperymentu
+│  ├─ Grid.py                  # siatka: zbiory × strategie × ziarna, z wznawianiem
+│  ├─ Tracking.py              # opcjonalne logowanie do MLflow
+│  ├─ Plots.py                 # wykresy i tabela do raportu (PNG i PDF)
 │  ├─ utils.py                 # LayerConfig, END, reguła ACS, PheromoneTable, ziarna
 │  ├─ Strategies/              # modele feromonów
 │  │  ├─ __init__.py           # rejestr STRATEGIES i typ StrategyName
@@ -363,21 +369,28 @@ ACO_nn_model_search/
 │  │  ├─ param_dependent.py
 │  │  ├─ config_dependent.py
 │  │  └─ random_search.py
-│  └─ Observers/               # słuchacze zdarzeń (logowanie, wykresy)
+│  └─ Observers/               # słuchacze zdarzeń
 │     ├─ __init__.py
 │     ├─ base.py               # BaseObserver z pustymi hookami
-│     └─ Observers.py          # grupa obserwatorów działająca jak jeden
-├─ data/                       # zbiory danych (na razie tylko .gitkeep)
-├─ runs/                       # wyniki przebiegów (na razie tylko .gitkeep)
-├─ main.py                     # punkt wejścia (na razie Hello World)
-├─ settings.py                 # ścieżki projektu (na razie pusty)
+│     ├─ Observers.py          # grupa obserwatorów działająca jak jeden
+│     └─ Recorders.py          # PheromoneRecorder: zapis feromonów co iterację
+├─ configs/                    # smoke.json (szybki test) i default.json
+├─ data/                       # pobrane zbiory (poza Gitem, zostaje .gitkeep)
+├─ runs/                       # wyniki przebiegów (poza Gitem, zostaje .gitkeep)
+├─ mlruns/                     # magazyn MLflow (poza Gitem)
+├─ tests/                      # testy pytest (evaluator, dane, eksperymenty, grid, obserwatory, wykresy)
+├─ main.py                     # jeden eksperyment z pliku JSON
+├─ grid.py                     # siatka eksperymentów
+├─ plots.py                    # wykresy po eksperymentach
+├─ settings.py                 # ścieżki projektu: DATA_DIR, RUNS_DIR, MLFLOW_DIR
+├─ EXPERIMENTS.md              # instrukcja uruchamiania E1–E4 dla zespołu
 ├─ pyproject.toml              # zależności i indeks PyTorch z CUDA
 ├─ uv.lock                     # zablokowane wersje pakietów
 └─ .python-version             # Python 3.12 dla uv
 ```
 
-Cały algorytm siedzi w pakiecie `ACO`, a reszta repozytorium to na razie konfiguracja i puste foldery na dane,\
-które czekają na wczytywanie zbiorów i wyniki eksperymentów, już zaplanowane.
+Algorytm siedzi w pakiecie `ACO`, a obok są skrypty, które z niego robią eksperymenty i wykresy,\
+więc zespół uruchamia je poleceniami z `EXPERIMENTS.md`, a w kod zagląda tylko wtedy, gdy czegoś w nim brakuje.
 
 ---
 
@@ -397,23 +410,26 @@ a `uv.lock` pilnuje dokładnych wersji, więc każdy dostaje to samo środowisko
 Indeks ma ustawione `explicit = true`, więc tylko `torch` jest z niego brany,\
 a cała reszta pakietów przychodzi ze zwykłego PyPI, bez zmiany.
 
-### `main.py`, `settings.py`, `data/` i `runs/`
+### `main.py`, `grid.py`, `plots.py`, `settings.py`, `data/` i `runs/`
 
-Plik `main.py` to na razie tylko Hello World, które `uv init` stworzył na początek,\
-a docelowo ma uruchamiać eksperymenty, gdy reszta kodu da z siebie pożytek.
+Plik `main.py` czyta konfigurację JSON i puszcza jeden eksperyment, a flagi `--device`, `--dataset`, `--strategy` i `--seeds` nadpisują to, co w pliku jest,\
+zaś `--mlflow` dokłada logowanie, a błąd, na przykład `--device gpu` bez karty, kończy się czytelnym komunikatem i kodem jeden, a nie stosem śladów w świecie.
 
-Plik `settings.py` jest pusty i ma trzymać wyłącznie ścieżki do danych, modeli i wyników,\
-bo parametry algorytmu siedzą w `ColonyConfig` i nie mieszamy tych dwóch rodzajów ustawień w jednym z plików.
+Plik `grid.py` robi to samo dla całej siatki zbiorów i strategii, ładuje każdy zbiór raz i domyślnie wznawia przerwane przebiegi,\
+a `--dry-run` tylko liczy, ile będzie przebiegów i modeli, więc przed wielką serią wiesz, ile to zajmie, a nie dowiadujesz się po fakcie.
 
-Foldery `data/` i `runs/` mają tylko pliki `.gitkeep`, żeby Git je w ogóle zachował,\
-bo pustych folderów Git nie śledzi i bez tego pliku folder by się schował.
+Plik `plots.py` po zakończonych eksperymentach rysuje wykresy i tabelę, w PNG i w PDF, bo oba idą do LaTeX-a,\
+a szczegóły są w `EXPERIMENTS.md`, w osobnej sekcji, żeby nikt nie szukał po omacku i nie błądził w próżni.
+
+Plik `settings.py` trzyma tylko ścieżki, czyli `DATA_DIR`, `RUNS_DIR` i `MLFLOW_DIR`, bo parametry algorytmu siedzą w `ColonyConfig`,\
+a foldery `data/` i `runs/` są w `.gitignore`, więc Git zachowuje tylko `.gitkeep`, a wyniki zespół wymienia we własnym zakresie.
 
 ### `ACO/__init__.py`
 
 Ten plik wystawia publiczne API pakietu, czyli to, czego zwykle potrzeba na zewnątrz,\
 więc wystarczy `from ACO import Colony, ColonyConfig`, a szczegóły zostają wewnątrz.
 
-Na zewnątrz wychodzą `Ant`, `Colony`, `ColonyConfig`, `PheromoneConfig`, `SearchSpace`, `EvaluationResult`, `Evaluator`, `BaseObserver`, `Observers`, `END` i `LayerConfig` w jednym pakiecie,\
+Na zewnątrz wychodzą `Ant`, `Colony`, `ColonyConfig`, `PheromoneConfig`, `SearchSpace`, `DataSplit`, `EvaluationResult`, `Evaluator`, `EvaluatorConfig`, `BaseObserver`, `Observers`, `END` i `LayerConfig` w jednym pakiecie,\
 a strategie i konteksty importuje się z podpakietu `ACO.Strategies`, gdy ktoś pisze własną strategię albo obserwatora na tym świecie.
 
 ### `ACO/utils.py`
@@ -495,23 +511,46 @@ a `_walk` prowadzi mrówkę krok po kroku, i `_run_ant` dokłada do tego ocenę 
 
 ### `ACO/Evaluator.py`
 
-To na razie zaślepka, w której każda metoda ma tylko `pass`, bo trening zaprojektujemy razem z obsługą danych,\
-a interfejs jest już ustalony, więc reszta kodu wie, czego się spodziewać od metod zaplanowanych.
+To prawdziwy trening, bo `Evaluator(data, config)` bierze `DataSplit` i `EvaluatorConfig` i dla każdej ścieżki buduje sieć, trenuje ją i ocenia,\
+a `Colony` używa tylko `evaluate_path` i bierze `val_accuracy` jako `score`, więc o danych nie wie nic i tak ma zostać, bez zmian.
 
-`EvaluationResult` to wynik oceny z dokładnością i stratą walidacyjną, czasem treningu i liczbą parametrów w sieci,\
-a `Colony` używa tylko `evaluate_path` i bierze `val_accuracy` jako `score`, więc reszta to wewnętrzne sprawy Evaluatora, gdy ktoś go napisze i zadanie mu się zleci.
+`EvaluatorConfig` ma pola `device`, `epochs`, `batch_size`, `learning_rate`, `weight_decay` i `patience`, z którym działa wczesne zatrzymanie po stracie walidacyjnej,\
+a `patience=None` je wyłącza, bo czasem trzeba policzyć wszystkie epoki do końca i bez żadnej taryfy ulgowej.
 
-| Metoda | Co ma robić |
+Pole `device` przyjmuje `cpu`, `gpu` albo `auto`, bo w zespole sprzęt bywa różny, a nikt nie chce zmieniać kodu pod swoją kartę,\
+więc `gpu` bierze CUDA lub MPS i rzuca czytelny błąd, gdy ich brak, a `auto` wybiera najlepsze, co jest pod ręką.
+
+| Metoda | Co robi |
 |---|---|
-| `evaluate_path(path, reuse_weights)` | cały proces dla jednej mrówki: budowa, opcjonalnie wczytanie wag, trening, ocena, zapis wag |
+| `evaluate_path(path, reuse_weights)` | cały proces dla jednej mrówki: budowa, wagi z prefiksu, trening, ocena walidacyjna, zapis wag |
+| `final_test(path)` | uczy zwycięską architekturę od zera i liczy wynik na zbiorze testowym, którego mrówki nie widziały |
 | `build_model(path)` | `nn.Sequential` z `Linear → aktywacja → Dropout` dla każdej warstwy i warstwą wyjściową na końcu |
-| `load_reusable_weights(path, model)` | kopiowanie wag z zapisanego modelu o najdłuższym wspólnym prefiksie ścieżki |
-| `store_weights(path, model, result)` | zapis modelu, jeśli jest najlepszy dla któregoś ze swoich prefiksów |
-| `train(model)` | trening na zbiorze treningowym |
-| `evaluate(model)` | ocena na walidacji i zwrot `EvaluationResult` |
+| `load_reusable_weights(path, model)` | kopiuje wagi z zapisanego modelu o najdłuższym wspólnym prefiksie, a zwraca liczbę użytych warstw |
+| `store_weights(path, model, result)` | zapis wag, jeśli model jest najlepszy dla któregoś ze swoich prefiksów |
+| `train(model)` | trening Adamem ze stratą entropii krzyżowej i wczesnym zatrzymaniem |
+| `evaluate(model, split)` | strata i dokładność na `"val"` albo `"test"` |
 
-Uwaga: z tą zaślepką `Colony.run()` wywróci się już przy pierwszym wyborze najlepszej mrówki,\
-bo `evaluate_path` zwraca `None`, a `ant.score` rzuca wtedy `RuntimeError`, więc do testów podstaw sztuczny Evaluator, zgodnie z sekcją jedenastą, gdzie są gotowe wskazówki.
+Uwaga: w wyniku z `final_test` pola `val_accuracy` i `val_loss` niosą liczby z **testu**, bo to ten sam typ `EvaluationResult`,\
+więc w plikach `summary.json` i w tabelach trafiają one do kolumn z nazwą `test_`, żeby nikt się nie pomylił.
+
+### `ACO/Data.py`
+
+`DataSplit` to niezmienna paczka z sześcioma tensorami, czyli `X` i `y` dla treningu, walidacji i testu,\
+a przy tworzeniu sprawdza kształty i zgodność liczby cech, więc zły podział wychodzi od razu, a nie w środku treningu.
+
+Ma `n_features` i `n_classes`, które Evaluator bierze do zbudowania sieci, oraz `to(device)`, które przenosi dane na kartę,\
+a `from_numpy` robi z tablic gotowe tensory, żeby testy i własne zbiory szły tą samą drogą.
+
+### `ACO/Datasets.py`
+
+Ten plik pobiera zbiory przez `fetch_openml` do `data/openml` i trzyma je w pamięci podręcznej, więc drugi raz nic się nie ściąga,\
+a słownik `DATASETS` zna trzy zbiory: `adult`, `wine` i `letter`, każdy z numerem w OpenML i listą kolumn do pominięcia, jak `fnlwgt` w Adult.
+
+Podział to stratyfikowane 60/20/20 w dwóch krokach, a preprocessing dopasowujemy tylko na treningu, żeby nic nie przeciekło do walidacji i testu,\
+czyli braki liczbowe uzupełnia mediana i standaryzacja, a kategorie dostają kolumnę `missing` i kodowanie one-hot, które nieznane wartości po prostu ignoruje.
+
+Parametr `min_class_count` pozwala wyrzucić klasy rzadsze niż zadany próg, co ma znaczenie w Wine, gdzie najrzadsza klasa ma pięć próbek,\
+a `python -m ACO.Datasets` wypisuje krótkie podsumowanie każdego zbioru, żeby od razu zobaczyć, co się pobrało.
 
 ### `ACO/Strategies/__init__.py`
 
@@ -597,10 +636,46 @@ a `extend` kopiuje wejście, bo bez tego `obs.extend(obs)` rośnie bez końca, p
 Pusta grupa `Observers` ma długość zero, więc w warunku `if` zachowuje się jak fałsz, dlatego kod sprawdza `is not None`, a nie posługuje się samą prawdziwością,\
 bo inaczej pusta grupa podana przez użytkownika zostałaby po cichu podmieniona na nową, co byłoby przykrą złośliwością.
 
+### `ACO/Observers/Recorders.py`
+
+`PheromoneRecorder` to obserwator, który po każdej iteracji kopiuje tablice feromonów i na końcu zapisuje je jako `pheromones.npz`,\
+a z tego pliku Plots rysuje potem mapy cieplne, więc nie trzeba liczyć niczego drugi raz ani zgadywać po czasie.
+
+Dla Random Search słownik feromonów jest pusty, więc plik nie powstaje i wykresów feromonów dla tej strategii też nie będzie.
+
 ### `ACO/Observers/__init__.py`
 
-Ten plik wystawia `BaseObserver` i `Observers` na zewnątrz przez względne importy z kropką na początku,\
+Ten plik wystawia `BaseObserver`, `Observers` i `PheromoneRecorder` na zewnątrz przez względne importy z kropką na początku,\
 a `__all__` zawiera nazwy jako napisy, bo Python tak tego wymaga, i wszystko jest w porządku.
+
+### `ACO/Experiment.py`
+
+`ExperimentConfig` składa w jedno nazwę, zbiór, listę ziaren, `ColonyConfig` i `EvaluatorConfig`, a `n_models` liczy budżet jako `n_ants × n_iterations`,\
+bo budżet to liczba ocenionych modeli, taka sama dla ACO i Random Search, a czas treningu zapisujemy obok, żeby porównanie było uczciwe od pierwszego biegu.
+
+Funkcja `run_experiment` robi po jednym przebiegu na ziarno i zapisuje w `runs/<nazwa>/<zbiór>_<strategia>_s<ziarno>/` trzy pliki,\
+czyli `ants.csv` ze wszystkimi ocenionymi sieciami, `pheromones.npz` i `summary.json` z wynikiem testowym oraz pełną konfiguracją.
+
+Wznawianie działa po porównaniu zapisanej konfiguracji z bieżącą, więc przebieg z inną konfiguracją nie uda, że jest ten sam,\
+a dlatego warianty w E3 muszą mieć różne `name`, bo inaczej wyniki jednego wariantu zastąpią drugi i nikt tego nie zauważy.
+
+### `ACO/Grid.py`
+
+`run_grid` przechodzi po wszystkich parach zbiór × strategia, ładuje każdy zbiór tylko raz i woła `run_experiment` dla każdej pary,\
+a na końcu zapisuje `grid_summary.csv`, z którego `aggregate` robi średnie po ziarnach z odchyleniem wyniku testowego.
+
+### `ACO/Tracking.py`
+
+`MLflowTracker` loguje każdy przebieg do MLflow, w bazie SQLite w `mlruns/`, z parametrami z konfiguracji i metrykami końcowymi,\
+a włącza się go flagą `--mlflow`, więc kto nie chce serwera ani dodatkowych kłopotów, po prostu go nie używa.
+
+### `ACO/Plots.py` i `plots.py`
+
+`load_runs` czyta zakończone przebiegi z `runs/`, a `make_all` zapisuje krzywe zbieżności, wykres efektywności, rozkłady, wynik testowy, mapy cieplne feromonów i tabelę,\
+każdy rysunek w PNG i w PDF z osadzonymi fontami, bo idą do LaTeX-a, a tabela w CSV i w `booktabs`, gotowa do `\input{}`.
+
+Kolor strategii jest stały na wszystkich wykresach, bo kolor idzie za bytem, a nie za miejscem w rankingu,\
+a kilka eksperymentów naraz daje serię na eksperyment, co się przydaje w E3, gdzie warianty trzeba położyć obok siebie.
 
 ---
 
@@ -766,6 +841,12 @@ best = colony.run()
 Błędna wartość, na przykład `greediness` większe od jeden albo nieznana nazwa strategii, zatrzyma program od razu z czytelnym błędem walidacji,\
 więc literówka w konfiguracji nie zmarnuje godzin liczenia, tylko wyjdzie na jaw przed startem pierwszej iteracji.
 
+Eksperyment ma własny plik JSON z polami `name`, `dataset`, `seeds`, `data_seed`, `min_class_count`, `colony` i `evaluator`,\
+a gotowe przykłady są w `configs/`, czyli `smoke.json` do szybkiego testu i `default.json` z samymi wartościami domyślnymi, bez żadnych poprawek.
+
+Pełny opis pól i przepisy na E1–E4 są w `EXPERIMENTS.md`, więc tu nie powielamy tego, co tam jest napisane,\
+a README zostaje od tłumaczenia, jak algorytm działa, żeby każdy w zespole wiedział, co się dzieje w środku, i miał to w głowie.
+
 ---
 
 ## 11. Jak uruchomić
@@ -778,14 +859,30 @@ uv sync
 ```
 
 Czy PyTorch widzi kartę graficzną, sprawdzisz jedną linijką w terminalu,\
-a jeśli wypisze `True`, to GPU działa bez żadnego skandalu.
+a jeśli wypisze `True`, to GPU działa bez żadnego skandalu, a jak `False`, to użyj `--device cpu` albo `auto`.
 
 ```bash
 uv run python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-Dopóki nie ma prawdziwego Evaluatora, kolonię testujesz sztucznym, który wynik wymyśla ze ścieżki od ręki,\
-więc mechanikę mrówek, feromonów i hooków sprawdzisz w kilka sekund, bez treningu i bez męki.
+Szybki test, że wszystko gra, to mały eksperyment na zbiorze Wine, który trwa chwilę i pobiera dane przy pierwszym uruchomieniu,\
+a potem siatka i wykresy robią się tymi samymi komendami, które są wypisane w `EXPERIMENTS.md`, w kolejności od startu do końca.
+
+```bash
+uv run python main.py configs/smoke.json
+uv run python grid.py configs/default.json --datasets all --strategies all --seeds 0 1 2 --dry-run
+uv run python plots.py smoke
+```
+
+Testy uruchamiasz z katalogu głównego repozytorium, bo czytają pliki z `configs/`, a testy obserwatorów liczą się około minuty, bo używają prawdziwego MLflow,\
+więc jeśli coś się zmieni w kodzie, puść je wszystkie, zanim wypchniesz zmiany, żeby nic po cichu nie zginęło.
+
+```bash
+uv run python -m pytest
+```
+
+Własną kolonię z podstawionym ewaluatorem nadal można złożyć w kilku linijkach, co przydaje się przy pisaniu nowej strategii lub obserwatora,\
+bo `Colony` wymaga ewaluatora z `evaluate_path` i bez niego rzuca czytelny błąd, więc sztuczny wystarczy do sprawdzenia mechaniki mrówek.
 
 ```python
 from ACO import BaseObserver, Colony, ColonyConfig, EvaluationResult
@@ -811,86 +908,39 @@ config = ColonyConfig(strategy="independent", n_ants=5, n_iterations=5)
 Colony(config, FakeEvaluator(), observers=PrintBest()).run()
 ```
 
-Taki skrypt zapisz w katalogu głównym repozytorium i uruchom przez `uv run python nazwa_pliku.py`, a zobaczysz, jak wynik rośnie z iteracji na iterację,\
-i właśnie tak sprawdzaliśmy hooki i strategie, zanim powstał prawdziwy trening i jego konfigurację.
-
 ---
 
 ## 12. Co jest do zrobienia
 
-Lista wynika z planu w PDF-ie i z tego, co wyszło w testach, a zadania są ułożone od najpilniejszych,\
-bo Evaluator i dane blokują wszystkie eksperymenty, więc stoją na liście najważniejszych.
+Cała infrastruktura jest gotowa, czyli Evaluator, dane, uruchamianie, siatka, obserwatory i wykresy,\
+więc zostały decyzje i same eksperymenty, a ich kolejność i szczegóły są w `EXPERIMENTS.md`, jak w przepisie.
 
-### Evaluator
+### Gotowe
 
-- [ ] Napisać `build_model`, który zamienia ścieżkę na `nn.Sequential` z `Linear`, aktywacją i `Dropout` dla każdej warstwy i z warstwą wyjściową na końcu,\
-  i trzymać się nazw aktywacji z `SearchSpace`, czyli `relu`, `tanh`, `elu` i `leaky_relu`, żeby nic się nie rozjechało w tym tańcu.
-- [ ] Napisać `train` i `evaluate` z treningiem na GPU, rozsądną liczbą epok i najlepiej z wczesnym zatrzymaniem,\
-  a `evaluate` ma zwracać `EvaluationResult` z dokładnością, stratą, czasem treningu i liczbą parametrów, zgodnie z zadaniem.
-- [ ] Dodać końcową ocenę najlepszej architektury na zbiorze testowym, którego mrówki nie dotykają,\
-  bo tylko ten wynik idzie do raportu, a walidacja służy mrówkom do wyboru i z testem się nie spotykają.
-- [ ] Opcjonalnie dopisać ponowne użycie wag, czyli `load_reusable_weights` i `store_weights`, z kluczem w postaci prefiksu ścieżki, jak w DeepSwarm to bywa,\
-  bo wtedy mrówki z tym samym początkiem ścieżki zaczynają trening z gotowych wag, i oszczędność czasu jest prawdziwa.
+- [x] Evaluator z wyborem CPU i GPU, wczesnym zatrzymaniem, ponownym użyciem wag i końcową oceną na teście.
+- [x] Wczytywanie Adult, Wine i Letter ze stratyfikowanym podziałem 60/20/20 i preprocessingiem bez przecieku.
+- [x] `main.py` i `grid.py` z wznawianiem, flagą `--dry-run` i opcjonalnym MLflow.
+- [x] Zapis wszystkich ocenionych sieci i feromonów oraz skrypt `plots.py` z wykresami w PNG i PDF.
+- [x] Budżet jako liczba ocenionych modeli, taki sam dla ACO i Random Search, z czasem treningu zapisanym obok.
 
-### Dane
+### Do decyzji zespołu
 
-- [ ] Napisać wczytywanie zbiorów Adult, Wine Quality i Letter Recognition, na przykład przez `fetch_openml`, z zapisem w `data/` w pamięci podręcznej,\
-  a ścieżki trzymać w `settings.py`, żeby nie były wpisane na sztywno w każdej funkcji osobno i nie robiły bałaganu w strukturze wewnętrznej.
-- [ ] Zrobić stratyfikowany podział 60/20/20 na trening, walidację i test, a standaryzację dopasowywać tylko na treningu,\
-  bo inaczej informacja z walidacji i testu przeciekłaby do modelu, i wyniki byłyby zawyżone od pierwszego biegu.
-- [ ] W Adult zakodować kolumny kategoryczne i obsłużyć braki danych, a w Wine Quality połączyć wino czerwone i białe i zdecydować, co zrobić z bardzo rzadkimi klasami,\
-  bo klasy 3 i 9 mają tylko garstkę próbek i mogą zepsuć podział stratyfikowany albo trening, więc trzeba to sprawdzić przed eksperymentami.
-- [ ] Ustalić, jak dane trafiają do Evaluatora, na przykład jako `TensorDataset` albo własna klasa zbioru,\
-  bo `Colony` o danych nic nie wie i tak ma zostać, więc dane żyją tylko w Evaluatorze, bez wyjątku i bez sporu.
-
-### Testy na trudniejszych zbiorach (nowe zadanie)
-
-- [ ] Zrobić przebiegi pilotażowe na wszystkich trzech zbiorach i sprawdzić, czy wynik najlepszej mrówki rośnie, czy stoi w miejscu jak wryty,\
-  bo na łatwym zbiorze wine wszystko wychodziło około 98 procent, więc pilotaż ma pokazać różnice, których tam nie było, a które tu muszą być odkryte.
-- [ ] Zmierzyć czas treningu jednej sieci i dobrać liczbę epok, mrówek i iteracji tak, żeby przebiegi zmieściły się na lokalnym GPU albo w Colabie w rozsądnym czasie,\
-  bo eksperymenty z wieloma ziarnami szybko mnożą koszt, a budżet trzeba znać przed startem, a nie po fakcie, w smutnym grymasie.
-- [ ] Wybrać miarę `score`, bo zwykła dokładność jest słaba dla niezbalansowanych zbiorów Adult i Wine Quality, i rozważyć F1 albo zbalansowaną dokładność w tej roli,\
-  a przy okazji rozstrzygać remisy stratą walidacyjną, żeby najlepsza mrówka nie była pierwszą lepszą, którą los wyróżnił w tej niedoli.
-- [ ] Dostroić `local_decay` i `evaporation`, bo w teście na wine aktualizacja lokalna zjadała prawie całą nagrodę globalną, jak opisano w sekcji o trudnościach,\
-  i sprawdzić, przy jakich wartościach kolonia się skupia, a przy jakich dalej szeroko eksploruje, we wszystkich kierunkach i możliwościach.
-
-### Obserwatory i logowanie
-
-- [ ] Napisać obserwatora MLflow, który zapisuje parametry konfiguracji, wyniki każdej iteracji i najlepszą sieć w jednym przebiegu,\
-  i zamyka przebieg w `on_search_end`, bo to ostatni hook, który się wykonuje, zanim `run` zwróci wynik po całym tym biegu.
-- [ ] Napisać obserwatora, który zapisuje każdą ocenioną architekturę do tabeli pandas, z numerem iteracji, warstwami, dokładnością i czasem treningu,\
-  i zapisuje ją do pliku w `runs/`, żeby analiza i wykresy korzystały z gotowych danych, bez ponownego przebiegu.
-- [ ] Napisać obserwatora, który zbiera kopie feromonów co iterację, żeby narysować z nich mapy cieplne i pokazać, jak kolonia się uczy,\
-  a dla Random Search pominąć te wykresy, bo jego słownik jest pusty, więc mapa niczego nie wyłuszczy.
-
-### Uruchamianie eksperymentów
-
-- [ ] Przygotować pliki JSON z konfiguracją dla każdego eksperymentu i skrypt, który uruchamia je z kilkoma ziarnami po kolei,\
-  żeby każdy wynik był średnią z kilku przebiegów, a nie szczęśliwym trafem jednej mrówki, która miała więcej nadziei.
-- [ ] Zapewnić ten sam budżet dla ACO i Random Search, a wcześniej ustalić, czy budżet to liczba ocenionych modeli, czy czas treningu,\
-  bo Random Search buduje płytsze, szybsze sieci, więc przy równej liczbie modeli zużyje mniej czasu, i porównanie byłoby krzywe od pierwszego biegu.
-- [ ] Podpiąć to wszystko pod `main.py`, żeby jedno polecenie uruchamiało wybrany eksperyment, a wyniki zapisywały się w MLflow i w `runs/` bez pytania,\
-  więc nikt nie traci czasu na kopiowanie plików ani na ręczne przepisywanie.
-- [ ] Dodać do repozytorium plik `.python-version`, bo na razie nie jest zacommitowany, a bez niego `uv` może wybrać inną wersję Pythona, niż trzeba,\
-  i dopisać kilka testów jednostkowych dla strategii i tablic feromonów, żeby zmiany nie psuły tego, co już działa, bo to podstawowa potrzeba.
+- [ ] Co zrobić z rzadkimi klasami w Wine, czyli czy ustawić `min_class_count`, bo najrzadsza klasa ma tylko pięć próbek.
+- [ ] Jak wymieniać końcowe wyniki, skoro `runs/` jest poza Gitem, na przykład przez wspólny dysk z paczkami z `runs/<nazwa>`.
+- [ ] Którą miarę brać jako `score`, bo dokładność bywa słaba na niezbalansowanych Adult i Wine, więc zastanówcie się nad F1 lub zbalansowaną dokładnością.
+- [ ] Jakie wartości `local_decay` i `evaporation` dobrać, bo w teście na wine aktualizacja lokalna zjadała prawie całą nagrodę globalną, o czym jest w sekcji o trudnościach.
 
 ### Eksperymenty z PDF-u
 
-- [ ] **E1**: porównać ACO z Random Search przy tym samym budżecie, żeby sprawdzić, czy feromony w ogóle pomagają w szukaniu,\
-  i pokazać rozkłady dokładności obu metod, a nie tylko najlepszy wynik, bo pojedynczy rekord nie mówi wiele o całym działaniu.
-- [ ] **E2**: porównać feromony niezależne z zależnymi, czyli `independent`, `param_dependent` i `config_dependent`, na tych samych zbiorach,\
-  i sprawdzić, czy zależności między warstwami są warte większej liczby komórek, czy tylko spowalniają naukę w tak dużych rozmiarach.
-- [ ] **E3**: zbadać wpływ liczby mrówek, parowania feromonów, czyli `evaporation`, i zachłanności, czyli `greediness`, na jakość architektur i przebieg optymalizacji,\
-  a przy okazji też `local_decay`, bo testy pokazały, że mocno hamuje zbieżność, więc warto go zbadać w tej samej serii i w tej samej konfiguracji.
-- [ ] **E4**: porównać efektywność wyszukiwania, czyli jak najlepszy wynik rośnie z iteracjami, ile modeli trzeba było ocenić i ile czasu to kosztowało,\
-  i zestawić to dla wszystkich metod, żeby było widać nie tylko, kto wygrał, ale też jakim kosztem i jak szybko się to opłacało.
+- [ ] **E1**: porównać ACO z Random Search przy tym samym budżecie, żeby sprawdzić, czy feromony w ogóle pomagają w szukaniu.
+- [ ] **E2**: porównać `independent`, `param_dependent` i `config_dependent` na tych samych zbiorach.
+- [ ] **E3**: zbadać wpływ liczby mrówek, `evaporation`, `greediness` i `local_decay`, a każdy wariant uruchomić pod osobną nazwą `name`.
+- [ ] **E4**: porównać efektywność wyszukiwania, czyli wynik względem liczby modeli i czasu treningu.
 
-### Wizualizacja i raport
+### Raport
 
-- [ ] Narysować krzywe zbieżności, rozkłady dokładności ACO i Random Search oraz mapy cieplne feromonów w Matplotlib i Seaborn, w jednym spójnym stylu,\
-  żeby wykresy w raporcie wyglądały jak z jednej ręki, a nie jak zbiór przypadkowych obrazków bez ładu i profilu.
-- [ ] Opisać w raporcie strategię `param_dependent`, bo nie ma jej w PDF-ie, a jest domyślna w kodzie, więc recenzent musi wiedzieć, skąd się wzięła i czym się od reszty różni,\
-  a każdą część raportu niech pisze osoba, która ją robiła, a jedna osoba złoży całość w spójny dokument, żeby nikt w ostatniej chwili nie błądził w próżni.
+- [ ] Opisać strategię `param_dependent`, bo nie ma jej w PDF-ie, a jest domyślna w kodzie, więc recenzent musi wiedzieć, skąd się wzięła.
+- [ ] Wstawić rysunki z `runs/<nazwa>/plots/` i tabele `summary_table.tex`, a całość złożyć w jeden spójny dokument.
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "name": "smoke",
+  "dataset": "wine",
+  "seeds": [0],
+  "colony": {
+    "n_ants": 2,
+    "n_iterations": 2,
+    "search_space": { "max_depth": 2 }
+  },
+  "evaluator": { "epochs": 3 }
+}
