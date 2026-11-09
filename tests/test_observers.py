@@ -129,7 +129,7 @@ def test_mlflow_run_is_marked_failed_when_the_run_crashes(tmp_path, synthetic_da
     def boom(self, path):
         raise RuntimeError("training exploded")
 
-    monkeypatch.setattr(Evaluator, "final_test", boom)
+    monkeypatch.setattr(Evaluator, "final_scores", boom)
     with pytest.raises(RuntimeError, match="exploded"):
         run_experiment(small_config(), tmp_path / "runs", log=quiet, tracker=MLflowTracker(tmp_path / "store"))
     _, runs = mlflow_runs(tmp_path / "store", "obs")

@@ -52,10 +52,15 @@ def run_grid(
 
 def aggregate(summary: pd.DataFrame) -> pd.DataFrame:
     """Mean over seeds (and std of the test accuracy) for every dataset and strategy."""
-    return summary.groupby(["dataset", "strategy"], sort=False).agg(
-        runs=("seed", "count"),
-        val_accuracy=("best_val_accuracy", "mean"),
-        test_accuracy=("test_accuracy", "mean"),
-        test_std=("test_accuracy", "std"),
-        train_time_s=("train_time_s", "mean"),
-    ).round(4)
+    columns = {
+        "runs": ("seed", "count"),
+        "val_accuracy": ("best_val_accuracy", "mean"),
+        "retrain_val_accuracy": ("retrain_val_accuracy", "mean"),
+        "test_accuracy": ("test_accuracy", "mean"),
+        "test_std": ("test_accuracy", "std"),
+        "test_balanced_accuracy": ("test_balanced_accuracy", "mean"),
+        "train_time_s": ("train_time_s", "mean"),
+    }
+    # summaries written before a column existed (older runs) simply leave it out
+    present = {name: spec for name, spec in columns.items() if spec[0] in summary.columns}
+    return summary.groupby(["dataset", "strategy"], sort=False).agg(**present).round(4)

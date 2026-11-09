@@ -73,7 +73,8 @@ class ProgressObserver(BaseObserver):
 
 SUMMARY_KEYS = (
     "experiment", "dataset", "strategy", "seed", "device", "n_models", "best_val_accuracy", "best_val_loss",
-    "best_layers", "best_n_params", "test_accuracy", "test_loss", "train_time_s", "search_time_s",
+    "best_val_balanced_accuracy", "best_layers", "best_n_params", "retrain_val_accuracy", "retrain_val_loss",
+    "test_accuracy", "test_loss", "test_balanced_accuracy", "train_time_s", "search_time_s",
 )
 
 Loader = Callable[["ExperimentConfig", "str | Path | None"], DataSplit]
@@ -171,7 +172,8 @@ def run_seed(
         if best is None:
             raise RuntimeError("The colony finished without evaluating any ant")
 
-        test = evaluator.final_test(best.path)  # retrains the winner from scratch, scores it on the test set
+        # retrains the winner from scratch and scores that one model on validation and on the test set
+        retrain_val, test = evaluator.final_scores(best.path)
         ants = ants_table(colony.ants)
         run_dir.mkdir(parents=True, exist_ok=True)
         ants.to_csv(run_dir / "ants.csv", index=False)
@@ -186,10 +188,15 @@ def run_seed(
             "n_models": len(colony.ants),
             "best_val_accuracy": best.result.val_accuracy,  # pyright: ignore[reportOptionalMemberAccess]
             "best_val_loss": best.result.val_loss,  # pyright: ignore[reportOptionalMemberAccess]
+            "best_val_balanced_accuracy": best.result.balanced_accuracy,  # pyright: ignore[reportOptionalMemberAccess]
             "best_layers": layers_text(best.path),
             "best_n_params": best.result.n_params,  # pyright: ignore[reportOptionalMemberAccess]
-            "test_accuracy": test.val_accuracy,  # the metric fields of final_test hold the test numbers
+            # the retrained model scored on validation: compare with best_val_accuracy to see the search's own bias
+            "retrain_val_accuracy": retrain_val.val_accuracy,
+            "retrain_val_loss": retrain_val.val_loss,
+            "test_accuracy": test.val_accuracy,  # the metric fields of the test result hold the test numbers
             "test_loss": test.val_loss,
+            "test_balanced_accuracy": test.balanced_accuracy,
             "train_time_s": float(ants["train_time"].sum()),
             "search_time_s": search_time,
         }
@@ -218,6 +225,7 @@ def ants_table(ants: list[Ant]) -> pd.DataFrame:
             "layers": [layers_text(ant.path) for ant in ants],
             "val_accuracy": [ant.result.val_accuracy for ant in ants],  # pyright: ignore[reportOptionalMemberAccess]
             "val_loss": [ant.result.val_loss for ant in ants],  # pyright: ignore[reportOptionalMemberAccess]
+            "val_balanced_accuracy": [ant.result.balanced_accuracy for ant in ants],  # pyright: ignore[reportOptionalMemberAccess]
             "train_time": [ant.result.train_time for ant in ants],  # pyright: ignore[reportOptionalMemberAccess]
             "n_params": [ant.result.n_params for ant in ants],  # pyright: ignore[reportOptionalMemberAccess]
         }

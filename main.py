@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as error:  # e.g. --device gpu without a GPU
         print(f"error: {error}", file=sys.stderr)
         return 1
-    scores = summary[["best_val_accuracy", "test_accuracy", "train_time_s"]]
+    scores = summary[["best_val_accuracy", "retrain_val_accuracy", "test_accuracy", "test_balanced_accuracy", "train_time_s"]]
     print(f"\nover {len(summary)} seed(s):")
     print(scores.agg(["mean", "std"]).round(4).to_string())
     return 0

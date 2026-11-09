@@ -1,0 +1,12 @@
+{
+  "name": "diag_reuse_off",
+  "dataset": "wine",
+  "seeds": [0, 1, 2],
+  "colony": {
+    "n_ants": 6,
+    "n_iterations": 5,
+    "reuse_weights": false,
+    "search_space": { "max_depth": 5 }
+  },
+  "evaluator": { "epochs": 15, "batch_size": 256, "patience": 3 }
+}

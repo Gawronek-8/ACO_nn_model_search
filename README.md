@@ -524,11 +524,12 @@ więc `gpu` bierze CUDA lub MPS i rzuca czytelny błąd, gdy ich brak, a `auto` 
 |---|---|
 | `evaluate_path(path, reuse_weights)` | cały proces dla jednej mrówki: budowa, wagi z prefiksu, trening, ocena walidacyjna, zapis wag |
 | `final_test(path)` | uczy zwycięską architekturę od zera i liczy wynik na zbiorze testowym, którego mrówki nie widziały |
+| `final_scores(path)` | jak `final_test`, ale zwraca parę `(val, test)` dla tego samego, raz wytrenowanego modelu |
 | `build_model(path)` | `nn.Sequential` z `Linear → aktywacja → Dropout` dla każdej warstwy i warstwą wyjściową na końcu |
 | `load_reusable_weights(path, model)` | kopiuje wagi z zapisanego modelu o najdłuższym wspólnym prefiksie, a zwraca liczbę użytych warstw |
 | `store_weights(path, model, result)` | zapis wag, jeśli model jest najlepszy dla któregoś ze swoich prefiksów |
 | `train(model)` | trening Adamem ze stratą entropii krzyżowej i wczesnym zatrzymaniem |
-| `evaluate(model, split)` | strata i dokładność na `"val"` albo `"test"` |
+| `evaluate(model, split)` | strata, dokładność i balanced accuracy na `"val"` albo `"test"` |
 
 Uwaga: w wyniku z `final_test` pola `val_accuracy` i `val_loss` niosą liczby z **testu**, bo to ten sam typ `EvaluationResult`,\
 więc w plikach `summary.json` i w tabelach trafiają one do kolumn z nazwą `test_`, żeby nikt się nie pomylił.

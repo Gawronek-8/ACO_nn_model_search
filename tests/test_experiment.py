@@ -56,8 +56,22 @@ def test_unknown_dataset_is_rejected():
 
 
 def test_shipped_configs_are_valid():
-    for name in ("default", "smoke"):
+    for name in ("default", "smoke", "pilot", "pilot_reuse_on", "pilot_reuse_off", "pilot_reuse_on_ep50", "pilot_reuse_off_ep50"):
         ExperimentConfig.from_json(f"configs/{name}.json")
+
+
+def test_diagnostic_configs_differ_from_pilot_only_where_intended():
+    pilot = ExperimentConfig.from_json("configs/pilot.json").model_dump()
+    for reuse in ("on", "off"):
+        for suffix, epochs in (("", 15), ("_ep50", 50)):
+            diag = ExperimentConfig.from_json(f"configs/pilot_reuse_{reuse}{suffix}.json").model_dump()
+            assert diag["name"] == f"diag_reuse_{reuse}{suffix}"
+            assert diag["colony"].pop("reuse_weights") == (reuse == "on")
+            assert diag["evaluator"].pop("epochs") == epochs
+            expected = {**pilot, "name": diag["name"]}
+            expected["colony"] = {k: v for k, v in pilot["colony"].items() if k != "reuse_weights"}
+            expected["evaluator"] = {k: v for k, v in pilot["evaluator"].items() if k != "epochs"}
+            assert diag == expected
 
 
 def test_run_experiment_writes_one_folder_per_seed(tmp_path, synthetic_dataset):
@@ -66,11 +80,14 @@ def test_run_experiment_writes_one_folder_per_seed(tmp_path, synthetic_dataset):
     assert list(summary["seed"]) == [0, 1]
     assert (summary["n_models"] == 6).all()
     assert (summary["test_accuracy"] > 0.5).all()
+    for column in ("retrain_val_accuracy", "test_balanced_accuracy", "best_val_balanced_accuracy"):
+        assert summary[column].between(0, 1).all()
 
     for seed in (0, 1):
         run_dir = tmp_path / "t" / f"wine_param_dependent_s{seed}"
         ants = pd.read_csv(run_dir / "ants.csv")
         assert len(ants) == 6
+        assert ants["val_balanced_accuracy"].between(0, 1).all()
         assert ants["best_so_far"].is_monotonic_increasing
         details = json.loads((run_dir / "summary.json").read_text())
         assert details["config"]["colony"]["n_ants"] == 3
