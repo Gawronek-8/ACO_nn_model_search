@@ -56,8 +56,17 @@ def test_unknown_dataset_is_rejected():
 
 
 def test_shipped_configs_are_valid():
-    for name in ("default", "smoke", "pilot", "pilot_reuse_on", "pilot_reuse_off", "pilot_reuse_on_ep50", "pilot_reuse_off_ep50"):
+    for name in ("default", "smoke", "pilot", "e1","pilot_reuse_on", "pilot_reuse_off", "pilot_reuse_on_ep50", "pilot_reuse_off_ep50"):
         ExperimentConfig.from_json(f"configs/{name}.json")
+
+
+def test_e1_config_matches_the_report():
+    """Report 2.1: 10 ants x 30 iterations, depth 6, 50 epochs, batch 128, patience 5, seeds 0-9, no weight reuse."""
+    e1 = ExperimentConfig.from_json("configs/e1.json")
+    assert e1.name == "e1" and e1.seeds == list(range(10)) and e1.n_models == 300
+    assert (e1.colony.n_ants, e1.colony.n_iterations, e1.colony.search_space.max_depth) == (10, 30, 6)
+    assert e1.colony.reuse_weights is False
+    assert (e1.evaluator.epochs, e1.evaluator.batch_size, e1.evaluator.patience) == (50, 128, 5)
 
 
 def test_diagnostic_configs_differ_from_pilot_only_where_intended():
