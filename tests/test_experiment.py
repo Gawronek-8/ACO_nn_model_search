@@ -61,16 +61,21 @@ def test_shipped_configs_are_valid():
 
 
 def test_diagnostic_configs_differ_from_pilot_only_where_intended():
+    """The 15-epoch pairs reproduce the pilot; the 50-epoch pairs use the E1 training of the report (2.1)."""
     pilot = ExperimentConfig.from_json("configs/pilot.json").model_dump()
+    training = {
+        "": {"epochs": 15, "batch_size": 256, "patience": 3},  # the pilot
+        "_ep50": {"epochs": 50, "batch_size": 128, "patience": 5},  # E1
+    }
     for reuse in ("on", "off"):
-        for suffix, epochs in (("", 15), ("_ep50", 50)):
+        for suffix, expected_training in training.items():
             diag = ExperimentConfig.from_json(f"configs/pilot_reuse_{reuse}{suffix}.json").model_dump()
             assert diag["name"] == f"diag_reuse_{reuse}{suffix}"
             assert diag["colony"].pop("reuse_weights") == (reuse == "on")
-            assert diag["evaluator"].pop("epochs") == epochs
+            assert {key: diag["evaluator"].pop(key) for key in expected_training} == expected_training
             expected = {**pilot, "name": diag["name"]}
             expected["colony"] = {k: v for k, v in pilot["colony"].items() if k != "reuse_weights"}
-            expected["evaluator"] = {k: v for k, v in pilot["evaluator"].items() if k != "epochs"}
+            expected["evaluator"] = {k: v for k, v in pilot["evaluator"].items() if k not in expected_training}
             assert diag == expected
 
 
