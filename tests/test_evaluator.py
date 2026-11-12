@@ -111,6 +111,39 @@ def test_final_test_scores_the_test_split():
     assert result.val_accuracy > 0.8
 
 
+def test_final_scores_rates_one_retrained_model_on_val_and_test():
+    evaluator = make_evaluator()
+    val, test = evaluator.final_scores([A, B])
+    assert val.val_accuracy > 0.8 and test.val_accuracy > 0.8
+    assert val.n_params == test.n_params and val.train_time == test.train_time > 0
+    assert evaluator.weights == {}  # retraining never touches the stored search weights
+
+
+class _Fixed(nn.Module):
+    """Always predicts the given labels, one per sample, in order."""
+
+    def __init__(self, predictions, n_classes):
+        super().__init__()
+        self.logits = nn.functional.one_hot(torch.tensor(predictions), n_classes).float()
+
+    def forward(self, x):
+        return self.logits[: len(x)]
+
+
+def test_balanced_accuracy_is_mean_recall_over_present_classes():
+    evaluator = make_evaluator()
+    y = torch.tensor([0, 0, 0, 0, 1, 1])  # class 2 is absent and must not count as recall 0
+    model = _Fixed([0, 0, 0, 0, 0, 1], n_classes=3)
+    _, accuracy, balanced = evaluator._score(model, torch.zeros(6, 6), y)
+    assert accuracy == pytest.approx(5 / 6)
+    assert balanced == pytest.approx((1.0 + 0.5) / 2)
+
+
+def test_results_carry_balanced_accuracy():
+    result = make_evaluator().evaluate_path([A], reuse_weights=False)
+    assert 0.0 <= result.balanced_accuracy <= 1.0
+
+
 def test_device_selection():
     assert resolve_device("cpu").type == "cpu"
     if not (torch.cuda.is_available() or torch.backends.mps.is_available()):

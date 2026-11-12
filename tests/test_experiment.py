@@ -56,8 +56,36 @@ def test_unknown_dataset_is_rejected():
 
 
 def test_shipped_configs_are_valid():
-    for name in ("default", "smoke"):
+    for name in ("default", "smoke", "pilot", "e1","pilot_reuse_on", "pilot_reuse_off", "pilot_reuse_on_ep50", "pilot_reuse_off_ep50"):
         ExperimentConfig.from_json(f"configs/{name}.json")
+
+
+def test_e1_config_matches_the_report():
+    """Report 2.1: 10 ants x 30 iterations, depth 6, 50 epochs, batch 128, patience 5, seeds 0-9, no weight reuse."""
+    e1 = ExperimentConfig.from_json("configs/e1.json")
+    assert e1.name == "e1" and e1.seeds == list(range(10)) and e1.n_models == 300
+    assert (e1.colony.n_ants, e1.colony.n_iterations, e1.colony.search_space.max_depth) == (10, 30, 6)
+    assert e1.colony.reuse_weights is False
+    assert (e1.evaluator.epochs, e1.evaluator.batch_size, e1.evaluator.patience) == (50, 128, 5)
+
+
+def test_diagnostic_configs_differ_from_pilot_only_where_intended():
+    """The 15-epoch pairs reproduce the pilot; the 50-epoch pairs use the E1 training of the report (2.1)."""
+    pilot = ExperimentConfig.from_json("configs/pilot.json").model_dump()
+    training = {
+        "": {"epochs": 15, "batch_size": 256, "patience": 3},  # the pilot
+        "_ep50": {"epochs": 50, "batch_size": 128, "patience": 5},  # E1
+    }
+    for reuse in ("on", "off"):
+        for suffix, expected_training in training.items():
+            diag = ExperimentConfig.from_json(f"configs/pilot_reuse_{reuse}{suffix}.json").model_dump()
+            assert diag["name"] == f"diag_reuse_{reuse}{suffix}"
+            assert diag["colony"].pop("reuse_weights") == (reuse == "on")
+            assert {key: diag["evaluator"].pop(key) for key in expected_training} == expected_training
+            expected = {**pilot, "name": diag["name"]}
+            expected["colony"] = {k: v for k, v in pilot["colony"].items() if k != "reuse_weights"}
+            expected["evaluator"] = {k: v for k, v in pilot["evaluator"].items() if k not in expected_training}
+            assert diag == expected
 
 
 def test_run_experiment_writes_one_folder_per_seed(tmp_path, synthetic_dataset):
@@ -66,11 +94,14 @@ def test_run_experiment_writes_one_folder_per_seed(tmp_path, synthetic_dataset):
     assert list(summary["seed"]) == [0, 1]
     assert (summary["n_models"] == 6).all()
     assert (summary["test_accuracy"] > 0.5).all()
+    for column in ("retrain_val_accuracy", "test_balanced_accuracy", "best_val_balanced_accuracy"):
+        assert summary[column].between(0, 1).all()
 
     for seed in (0, 1):
         run_dir = tmp_path / "t" / f"wine_param_dependent_s{seed}"
         ants = pd.read_csv(run_dir / "ants.csv")
         assert len(ants) == 6
+        assert ants["val_balanced_accuracy"].between(0, 1).all()
         assert ants["best_so_far"].is_monotonic_increasing
         details = json.loads((run_dir / "summary.json").read_text())
         assert details["config"]["colony"]["n_ants"] == 3

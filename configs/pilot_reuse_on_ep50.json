@@ -1,0 +1,12 @@
+{
+  "name": "diag_reuse_on_ep50",
+  "dataset": "wine",
+  "seeds": [0, 1, 2],
+  "colony": {
+    "n_ants": 6,
+    "n_iterations": 5,
+    "reuse_weights": true,
+    "search_space": { "max_depth": 5 }
+  },
+  "evaluator": { "epochs": 50, "batch_size": 128, "patience": 5 }
+}

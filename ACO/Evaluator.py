@@ -42,6 +42,8 @@ class EvaluationResult:
     val_loss: float
     train_time: float
     n_params: int
+    # mean per-class recall on the same split; only reported, the ants are still scored by val_accuracy
+    balanced_accuracy: float = math.nan
 
 
 @dataclass
@@ -100,7 +102,19 @@ class Evaluator:
         The metric fields of the returned result (`val_accuracy`, `val_loss`) hold the TEST numbers.
         Validation is still used for early stopping.
         """
-        return self._fit_and_score(self.build_model(path), "test")
+        return self.final_scores(path)[1]
+
+    def final_scores(self, path: list[LayerConfig]) -> tuple[EvaluationResult, EvaluationResult]:
+        """Trains the architecture from scratch once and scores that one model on validation and on test.
+
+        Returns (val, test). The validation score of the retrained model shows how much of the gap between the
+        search score (`best_val_accuracy`) and the test score comes from the search itself (reused weights,
+        picking the maximum of noisy scores) and how much from the data split.
+        """
+        model = self.build_model(path)
+        test = self._fit_and_score(model, "test")
+        val = replace(self.evaluate(model, "val"), train_time=test.train_time)
+        return val, test
 
     def build_model(self, path: list[LayerConfig]) -> nn.Module:
         """Linear -> activation -> (dropout) for every layer of the path, then the output layer."""
@@ -164,7 +178,7 @@ class Evaluator:
 
             if config.patience is None:
                 continue
-            val_loss, _ = self._score(model, data.X_val, data.y_val)
+            val_loss, _, _ = self._score(model, data.X_val, data.y_val)
             if val_loss < best_loss:
                 best_loss, best_state, stale_epochs = val_loss, copy.deepcopy(model.state_dict()), 0
             else:
@@ -178,8 +192,8 @@ class Evaluator:
     def evaluate(self, model: nn.Module, split: Literal["val", "test"] = "val") -> EvaluationResult:
         """Accuracy and loss on one split; `train_time` is filled in by the caller that measured it."""
         X, y = (self.data.X_val, self.data.y_val) if split == "val" else (self.data.X_test, self.data.y_test)
-        loss, accuracy = self._score(model, X, y)
-        return EvaluationResult(accuracy, loss, 0.0, sum(p.numel() for p in model.parameters()))
+        loss, accuracy, balanced = self._score(model, X, y)
+        return EvaluationResult(accuracy, loss, 0.0, sum(p.numel() for p in model.parameters()), balanced)
 
     def _fit_and_score(self, model: nn.Module, split: Literal["val", "test"]) -> EvaluationResult:
         start = time.perf_counter()
@@ -190,16 +204,27 @@ class Evaluator:
         return replace(self.evaluate(model, split), train_time=train_time)
 
     @torch.no_grad()
-    def _score(self, model: nn.Module, X: torch.Tensor, y: torch.Tensor) -> tuple[float, float]:
-        """Returns (mean cross entropy, accuracy) over the whole split."""
+    def _score(self, model: nn.Module, X: torch.Tensor, y: torch.Tensor) -> tuple[float, float, float]:
+        """Returns (mean cross entropy, accuracy, balanced accuracy) over the whole split.
+
+        Balanced accuracy is the mean recall over the classes present in `y`, so a rare class weighs as much
+        as a common one.
+        """
         model.eval()
-        total_loss, correct = 0.0, 0
+        n_classes = self.data.n_classes
+        total_loss = 0.0
+        per_class = torch.zeros(n_classes, dtype=torch.long, device=y.device)
+        hits = torch.zeros(n_classes, dtype=torch.long, device=y.device)
         for start in range(0, len(X), EVAL_BATCH_SIZE):
             logits = model(X[start : start + EVAL_BATCH_SIZE])
             target = y[start : start + EVAL_BATCH_SIZE]
             total_loss += nn.functional.cross_entropy(logits, target, reduction="sum").item()
-            correct += (logits.argmax(dim=1) == target).sum().item()
-        return total_loss / len(X), correct / len(X)
+            correct = logits.argmax(dim=1) == target
+            per_class += torch.bincount(target, minlength=n_classes)
+            hits += torch.bincount(target[correct], minlength=n_classes)
+        present = per_class > 0
+        balanced = (hits[present].double() / per_class[present].double()).mean().item()
+        return total_loss / len(X), hits.sum().item() / len(X), balanced
 
 
 def _linears(model: nn.Module) -> list[nn.Linear]:

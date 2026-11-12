@@ -151,7 +151,7 @@ def _legend(figure: Figure, runs: Runs, handles: dict) -> None:
     """A legend is always there for two or more series; a single series is named by the figure itself."""
     if len(runs.series_order) > 1:
         ordered = [name for name in runs.series_order if name in handles]
-        figure.legend([handles[n] for n in ordered], ordered, loc="outside lower center", ncols=len(ordered), frameon=False)
+        figure.legend([handles[n] for n in ordered], ordered, loc="outside lower center", ncols=min(len(ordered), 2 * len(runs.datasets)), frameon=False)
 
 
 def _cap_accuracy(ax: Axes) -> None:
@@ -392,7 +392,7 @@ def save_figure(figure: Figure, out_dir: Path, name: str, formats: list[str]) ->
     paths = []
     for fmt in formats:
         path = out_dir / f"{name}.{fmt}"
-        figure.savefig(path, dpi=200, facecolor="white")
+        figure.savefig(path, dpi=200, facecolor="white", bbox_inches="tight")
         paths.append(path)
     return paths
 

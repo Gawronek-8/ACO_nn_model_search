@@ -117,11 +117,15 @@ runs/<name>/
     pheromones.npz                          stan feromonów po każdej iteracji (tylko strategie ACO)
 ```
 
-Kolumny `ants.csv`: `ant`, `iteration`, `n_layers`, `layers` (np. `64-relu-0.1 | 32-tanh-0.0`, czyli neurony-aktywacja-dropout), `val_accuracy`, `val_loss`, `train_time`, `n_params`, `best_so_far`.
+Kolumny `ants.csv`: `ant`, `iteration`, `n_layers`, `layers` (np. `64-relu-0.1 | 32-tanh-0.0`, czyli neurony-aktywacja-dropout), `val_accuracy`, `val_loss`, `val_balanced_accuracy`, `train_time`, `n_params`, `best_so_far`.
 
-W `summary.json` i `grid_summary.csv`: `best_val_accuracy`, `test_accuracy`, `train_time_s` (suma treningu wszystkich sieci), `search_time_s` (cały czas przebiegu), `device`.
+W `summary.json` i `grid_summary.csv`: `best_val_accuracy`, `best_val_balanced_accuracy`, `retrain_val_accuracy`, `retrain_val_loss`, `test_accuracy`, `test_balanced_accuracy`, `train_time_s` (suma treningu wszystkich sieci), `search_time_s` (cały czas przebiegu), `device`.
 
 Wynik na teście (`test_accuracy`) pochodzi z ponownego treningu najlepszej architektury od zera. Mrówki nigdy nie widzą zbioru testowego. Do wyboru architektury służy walidacja.
+
+`retrain_val_accuracy` to dokładność walidacyjna tej samej, ponownie wytrenowanej sieci, z której pochodzi `test_accuracy`. Różnica `best_val_accuracy − retrain_val_accuracy` pokazuje, ile zawyża samo wyszukiwanie (ponowne użycie wag, wybór maksimum z zaszumionych wyników). Różnica `retrain_val_accuracy − test_accuracy` to już rozjazd między podziałami danych.
+
+Balanced accuracy (średnia czułość po klasach obecnych w danym podziale) jest tylko raportowana. Mrówki dalej oceniają sieci zwykłą dokładnością.
 
 ## 8. Feromony i MLflow
 

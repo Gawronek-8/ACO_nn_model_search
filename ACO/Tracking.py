@@ -14,7 +14,8 @@ from .Observers import BaseObserver
 from .Strategies.base import AntContext, IterationContext
 
 FINAL_METRICS = (
-    "best_val_accuracy", "best_val_loss", "best_n_params", "test_accuracy", "test_loss", "train_time_s", "search_time_s",
+    "best_val_accuracy", "best_val_loss", "best_val_balanced_accuracy", "best_n_params", "retrain_val_accuracy",
+    "retrain_val_loss", "test_accuracy", "test_loss", "test_balanced_accuracy", "train_time_s", "search_time_s",
 )
 
 
