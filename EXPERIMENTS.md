@@ -103,7 +103,11 @@ uv run python grid.py configs/default.json --datasets all --strategies independe
 ```
 **Każdy wariant musi mieć inne `name`.** Gdyby dwa warianty miały to samo, wyniki jednego nadpisałyby drugi. Zmieniaj w E3: `n_ants`, `pheromone.evaporation`, `greediness` i `pheromone.local_decay` (ten ostatni mocno hamuje zbieżność). Zmiana `n_ants` zmienia też budżet, więc porównuj to ostrożnie.
 
-**E4: efektywność wyszukiwania** nie wymaga osobnych przebiegów. Dane są już w wynikach E1 i E2: `ants.csv` ma kolumnę `best_so_far` (jak najlepszy wynik rośnie z kolejnymi modelami), a `summary.json` ma czas.
+**E4: efektywność wyszukiwania** nie wymaga osobnych przebiegów. Dane są już w wynikach E1 i E2: `ants.csv` ma kolumnę `best_so_far` (jak najlepszy wynik rośnie z kolejnymi modelami), a `summary.json` ma czas. Analizę liczy `efficiency.py`:
+```powershell
+uv run python efficiency.py e1
+```
+Porównuje warianty ACO z Random Search po 25, 50, 100, 200 i 300 modelach (test U Manna-Whitneya z korektą Holma dla każdego budżetu), liczy, po ilu modelach i w jakim czasie każdy przebieg osiąga średni wynik końcowy Random Search, oraz koszt jednego modelu. Wyniki trafiają do `runs/e4/`: tabele CSV, tabele LaTeX i wykresy `img/e4/advantage` oraz `img/e4/to_target`. Sekcja do raportu z tymi wynikami jest w `report/e4.tex`. Czasy treningu są porównywalne tylko wtedy, gdy każdy przebieg liczył się na takim samym sprzęcie; liczby w `report/e4.tex` pochodzą z powtórzenia E1 na CPU, jeden wątek na przebieg.
 
 ## 7. Co powstaje w `runs/`
 
