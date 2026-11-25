@@ -1,0 +1,56 @@
+{
+  "name": "e3_n_ants_50",
+  "dataset": "wine",
+  "seeds": [
+    0
+  ],
+  "data_seed": 42,
+  "min_class_count": 0,
+  "colony": {
+    "strategy": "param_dependent",
+    "n_ants": 50,
+    "n_iterations": 6,
+    "greediness": 0.5,
+    "progressive_depth": true,
+    "local_update": "per_ant",
+    "global_update_ant": "global_best",
+    "reuse_weights": true,
+    "seed": 42,
+    "search_space": {
+      "neurons": [
+        16,
+        32,
+        64,
+        128,
+        256
+      ],
+      "activation": [
+        "relu",
+        "tanh",
+        "elu",
+        "leaky_relu"
+      ],
+      "dropout": [
+        0.0,
+        0.1,
+        0.3,
+        0.5
+      ],
+      "max_depth": 6,
+      "min_depth": 1
+    },
+    "pheromone": {
+      "start": 0.1,
+      "local_decay": 0.1,
+      "evaporation": 0.1
+    }
+  },
+  "evaluator": {
+    "device": "auto",
+    "epochs": 50,
+    "batch_size": 128,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "patience": 5
+  }
+}
